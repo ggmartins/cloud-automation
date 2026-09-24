@@ -12,11 +12,10 @@ RUN apt-get update && apt-get upgrade -y \
       bash-completion \
       curl \
       dnsutils \
-      unzip
+      unzip \
+      gnupg
 
 FROM slim-base AS builder-gen3
-
-ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y \
@@ -34,8 +33,6 @@ RUN python3 -m venv /opt/gen3_venv && \
 
 FROM slim-base AS builder-terraform
 
-ENV DEBIAN_FRONTEND=noninteractive
-
 # install terraform
 RUN curl -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/0.11.15/terraform_0.11.15_linux_amd64.zip \
   && unzip /tmp/terraform.zip -d /usr/local/bin && /bin/rm /tmp/terraform.zip
@@ -45,6 +42,20 @@ RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | b
 
 RUN curl -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/0.12.31/terraform_0.12.31_linux_amd64.zip \
   && unzip /tmp/terraform.zip -d /tmp && mv /tmp/terraform /usr/local/bin/terraform12 && /bin/rm /tmp/terraform.zip
+
+FROM slim-base AS builder-kubectl
+
+# From  https://hub.docker.com/r/google/cloud-sdk/~/dockerfile/
+RUN export CLOUD_SDK_REPO="cloud-sdk" && \
+    echo "deb https://packages.cloud.google.com/apt $CLOUD_SDK_REPO main" > /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
+    apt-get update && \
+    apt-get install -y kubectl && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/* && \
+    kubectl version --client && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /var/log/*
 
 
 ################### SLIM IMAGE ######################
@@ -61,6 +72,8 @@ COPY --from=builder-terraform /usr/local/bin/terraform /usr/local/bin/terraform
 COPY --from=builder-terraform /usr/local/bin/terraform12 /usr/local/bin/terraform12
 
 COPY --from=builder-terraform /usr/local/bin/helm /usr/local/bin/helm
+
+COPY --from=builder-kubectl /usr/bin/kubectl /usr/bin/kubectl
 
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y \
@@ -82,8 +95,7 @@ RUN apt-get update && apt-get upgrade -y \
       tmux \
       vim \
       wget \
-      yq \
-      gnupg
+      yq 
 
 # aws cli v2
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
