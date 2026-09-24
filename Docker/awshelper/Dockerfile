@@ -1,7 +1,7 @@
 # Build from root of cloud-automation/ repo:
 #   docker build -f Docker/awshelper/Dockerfile 
 #
-FROM quay.io/cdis/ubuntu-fips-base:24.04
+FROM ubuntu-fips-base:slim1-amd64
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -13,7 +13,6 @@ RUN apt-get update && apt-get upgrade -y \
       curl \
       dnsutils \
       ftp \
-      gcc \
       gettext-base \
       git \
       groff-base \
