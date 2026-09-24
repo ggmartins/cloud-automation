@@ -1,7 +1,7 @@
 # Build from root of cloud-automation/ repo:
 #   docker build -f Docker/awshelper/Dockerfile 
 #
-FROM ubuntu-fips-base:slim1-amd64
+FROM ubuntu-fips-base:slim1-amd64 AS slim-base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -12,7 +12,58 @@ RUN apt-get update && apt-get upgrade -y \
       bash-completion \
       curl \
       dnsutils \
-      ftp \
+      unzip
+
+FROM slim-base AS builder-gen3
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y \
+      python3 \
+      python3-crcmod \
+      python3-dev \
+      python3-pip \
+      python3-setuptools \
+      python3-venv
+
+# Set up virtual environment in /opt/gen3_venv
+RUN python3 -m venv /opt/gen3_venv && \
+    /opt/gen3_venv/bin/pip install --upgrade pip && \
+    /opt/gen3_venv/bin/pip install "gen3>4" pyyaml 
+
+FROM slim-base AS builder-terraform
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# install terraform
+RUN curl -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/0.11.15/terraform_0.11.15_linux_amd64.zip \
+  && unzip /tmp/terraform.zip -d /usr/local/bin && /bin/rm /tmp/terraform.zip
+
+# Install Helm CLI
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+RUN curl -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/0.12.31/terraform_0.12.31_linux_amd64.zip \
+  && unzip /tmp/terraform.zip -d /tmp && mv /tmp/terraform /usr/local/bin/terraform12 && /bin/rm /tmp/terraform.zip
+
+
+################### SLIM IMAGE ######################
+FROM slim-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+COPY --from=builder-gen3 /opt/gen3_venv /opt/gen3_venv
+
+RUN chown -R ubuntu: /opt/gen3_venv
+
+COPY --from=builder-terraform /usr/local/bin/terraform /usr/local/bin/terraform
+
+COPY --from=builder-terraform /usr/local/bin/terraform12 /usr/local/bin/terraform12
+
+COPY --from=builder-terraform /usr/local/bin/helm /usr/local/bin/helm
+
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y \
       gettext-base \
       git \
       groff-base \
@@ -26,31 +77,19 @@ RUN apt-get update && apt-get upgrade -y \
       net-tools \
       openssh-client \
       openssh-server \
-      python3 \
-      python3-crcmod \
-      python3-dev \
-      python3-pip \
-      python3-setuptools \
-      python3-venv \
       ssh \
       sudo \
       tmux \
-      unzip \
       vim \
       wget \
-      yq
+      yq \
+      gnupg
 
 # aws cli v2
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
     && unzip awscliv2.zip \
     && ./aws/install \
     && /bin/rm -rf awscliv2.zip ./aws
-
-# Set up virtual environment in /opt/gen3_venv
-RUN python3 -m venv /opt/gen3_venv && \
-    /opt/gen3_venv/bin/pip install --upgrade pip && \
-    /opt/gen3_venv/bin/pip install "gen3>4" pyyaml && \
-    chown -R ubuntu: /opt/gen3_venv
 
 RUN echo 'export PATH="/opt/gen3_venv/bin:$PATH"' > /etc/profile.d/gen3.sh && \
     chmod +x /etc/profile.d/gen3.sh
@@ -76,16 +115,6 @@ RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc| gpg --dearmor
     apt-get update && \
     apt-get install -y postgresql-client-16
 
-# install terraform
-RUN curl -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/0.11.15/terraform_0.11.15_linux_amd64.zip \
-   && unzip /tmp/terraform.zip -d /usr/local/bin && /bin/rm /tmp/terraform.zip
-
-# Install Helm CLI
-RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
-RUN curl -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/0.12.31/terraform_0.12.31_linux_amd64.zip \
-   && unzip /tmp/terraform.zip -d /tmp && mv /tmp/terraform /usr/local/bin/terraform12 && /bin/rm /tmp/terraform.zip
-
 RUN echo "ubuntu:gen3" | chpasswd
 
 # Setup scripts to run sshd for wetty - see kube/services/tty
@@ -95,8 +124,7 @@ RUN mkdir -p /opt/usersshd \
 
 RUN mkdir /var/run/sshd \
   && touch /var/log/lastlog \
-  && update-alternatives --install /usr/bin/python python /usr/bin/python3 100 \
-  && update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 100 \
+  && update-alternatives --install /opt/gen3_venv/bin/python python /usr/bin/python3 100 \
   && [ "Python 3" = "$(python --version | awk -F . '{ print $1 }')" ]
 
 EXPOSE 2222
